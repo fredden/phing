@@ -42,16 +42,14 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testRun');
 
-        $expectedCommand = 'phpstan analyse';
-
-        $this->assertExpectedCommandInLogs($expectedCommand);
+        $this->assertExpectedCommandInLogs(['phpstan', 'analyse']);
     }
 
     public function testItRunWithFileset(): void
     {
         $this->executeTarget('testRunFileset');
 
-        $this->assertExpectedCommandInLogs('phpstan analyse');
+        $this->assertExpectedCommandInLogs(['phpstan', 'analyse']);
     }
 
     /**
@@ -61,12 +59,12 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testExecutableChange');
 
-        $expectedCommand = str_replace(
+        $expectedCommand = [str_replace(
             '/',
             DIRECTORY_SEPARATOR,
             '/non/existing/path/to/phpstan'
-        );
-        $expectedCommand .= ' analyse';
+        )];
+        $expectedCommand[] = 'analyse';
 
         $this->assertExpectedCommandInLogs($expectedCommand);
     }
@@ -88,15 +86,16 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testAnalyseOptions');
 
-        $expectedCommand = 'phpstan analyse';
-        $expectedCommand .= ' --configuration=anyConfiguration';
-        $expectedCommand .= ' --level=anyLevel';
-        $expectedCommand .= ' --no-progress';
-        $expectedCommand .= ' --debug';
-        $expectedCommand .= ' --autoload-file=anyAutoloadFile';
-        $expectedCommand .= ' --error-format=anyErrorFormat';
-        $expectedCommand .= ' --memory-limit=anyMemoryLimit';
-        $expectedCommand .= ' path1 path2';
+        $expectedCommand = ['phpstan', 'analyse'];
+        $expectedCommand[] = '--configuration=anyConfiguration';
+        $expectedCommand[] = '--level=anyLevel';
+        $expectedCommand[] = '--no-progress';
+        $expectedCommand[] = '--debug';
+        $expectedCommand[] = '--autoload-file=anyAutoloadFile';
+        $expectedCommand[] = '--error-format=anyErrorFormat';
+        $expectedCommand[] = '--memory-limit=anyMemoryLimit';
+        $expectedCommand[] = 'path1';
+        $expectedCommand[] = 'path2';
 
         $this->assertExpectedCommandInLogs($expectedCommand);
     }
@@ -108,10 +107,10 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testHelpOptions');
 
-        $expectedCommand = 'phpstan help';
-        $expectedCommand .= ' --format=anyFormat';
-        $expectedCommand .= ' --raw';
-        $expectedCommand .= ' anyCommand';
+        $expectedCommand = ['phpstan', 'help'];
+        $expectedCommand[] = '--format=anyFormat';
+        $expectedCommand[] = '--raw';
+        $expectedCommand[] = 'anyCommand';
 
         $this->assertExpectedCommandInLogs($expectedCommand);
     }
@@ -123,10 +122,10 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testListOptions');
 
-        $expectedCommand = 'phpstan list';
-        $expectedCommand .= ' --format=anyFormat';
-        $expectedCommand .= ' --raw';
-        $expectedCommand .= ' anyNamespace';
+        $expectedCommand = ['phpstan', 'list'];
+        $expectedCommand[] = '--format=anyFormat';
+        $expectedCommand[] = '--raw';
+        $expectedCommand[] = 'anyNamespace';
 
         $this->assertExpectedCommandInLogs($expectedCommand);
     }
@@ -138,20 +137,21 @@ class PHPStanTaskTest extends BuildFileTest
     {
         $this->executeTarget('testCommonOptions');
 
-        $expectedCommand = 'phpstan analyse';
-        $expectedCommand .= ' --help';
-        $expectedCommand .= ' --quiet';
-        $expectedCommand .= ' --version';
-        $expectedCommand .= ' --ansi';
-        $expectedCommand .= ' --no-ansi';
-        $expectedCommand .= ' --no-interaction';
-        $expectedCommand .= ' --verbose';
+        $expectedCommand = ['phpstan', 'analyse'];
+        $expectedCommand[] = '--help';
+        $expectedCommand[] = '--quiet';
+        $expectedCommand[] = '--version';
+        $expectedCommand[] = '--ansi';
+        $expectedCommand[] = '--no-ansi';
+        $expectedCommand[] = '--no-interaction';
+        $expectedCommand[] = '--verbose';
 
         $this->assertExpectedCommandInLogs($expectedCommand);
     }
 
-    private function assertExpectedCommandInLogs(string $expectedCommand): void
+    private function assertExpectedCommandInLogs(array $expectedCommand): void
     {
-        $this->assertInLogs('Executing command: ' . $expectedCommand, Project::MSG_INFO);
+        $commandString = implode(' ', array_map('escapeshellarg', $expectedCommand));
+        $this->assertInLogs('Executing command: ' . $commandString, Project::MSG_INFO);
     }
 }

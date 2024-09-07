@@ -116,7 +116,7 @@ Issues can be reported on [GitHub](https://github.com/phingofficial/phing/issues
 The best way to submit code to Phing is to [make a Pull Request on GitHub](https://help.github.com/articles/creating-a-pull-request).
 Please help us merge your contribution quickly and keep your pull requests clean and concise: squash commits and don't introduce unnecessary (whitespace) changes.
 
-Phing's source code is formatted according to the PSR-2 standard.
+Phing's source code is formatted according to the PSR-12 standard.
 
 ### Running the (unit) tests
 

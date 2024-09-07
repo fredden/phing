@@ -549,6 +549,9 @@ class ApplyTask extends ExecTask
         // Log
         $this->log('Command building started ', $this->loglevel);
 
+        // The parent class sets up other properties which we need too.
+        parent::buildCommand();
+
         // Building the executable
         $this->realCommand = (string) $this->commandline;
 
@@ -561,12 +564,8 @@ class ApplyTask extends ExecTask
         }
 
         // Setting command output redirection with content appending
-        if (null !== $this->output) {
-            $this->additionalCmds .= sprintf(
-                ' 1>%s %s',
-                $this->appendoutput ? '>' : '',
-                escapeshellarg($this->output->getPath())
-            );
+        if (null !== $this->output && $this->appendoutput) {
+            $this->pipeSpec[1][2] = 'a';
         } elseif ($this->spawn) { // Validating the 'spawn' configuration, and redirecting the output to 'null'
             $this->additionalCmds .= sprintf(' %s', 'WIN' === $this->osvariant ? '> NUL' : '1>/dev/null');
 
@@ -574,12 +573,8 @@ class ApplyTask extends ExecTask
         }
 
         // Setting command error redirection with content appending
-        if (null !== $this->error) {
-            $this->additionalCmds .= sprintf(
-                ' 2>%s %s',
-                $this->appendoutput ? '>' : '',
-                escapeshellarg($this->error->getPath())
-            );
+        if (null !== $this->error && $this->appendoutput) {
+            $this->pipeSpec[2][2] = 'a';
         }
 
         // Setting the execution as a background process
@@ -777,7 +772,7 @@ class ApplyTask extends ExecTask
             if (!empty($previousValue)) {
                 $previousValue .= "\n";
             }
-            $this->project->setProperty($this->outputProperty, $previousValue . implode("\n", $output));
+            $this->project->setProperty($this->outputProperty, $previousValue . $output);
         }
 
         // Validating the 'return-code'

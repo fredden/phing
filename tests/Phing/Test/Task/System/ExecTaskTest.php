@@ -268,7 +268,7 @@ class ExecTaskTest extends BuildFileTest
         $out = ob_get_clean();
         $this->assertEquals('foo', rtrim($out, " \r\n"));
         //foo should not be in logs, except for the logged command
-        $this->assertInLogs('echo foo');
+        $this->assertInLogs("Executing command: 'echo' 'foo'");
         $this->assertNotContains('foo', $this->logBuffer);
     }
 
@@ -329,8 +329,8 @@ class ExecTaskTest extends BuildFileTest
     public function testEscapedArgWithoutWhitespace(): void
     {
         $this->executeTarget(__FUNCTION__);
-        $this->assertInLogs($this->windows ? '"echo" "foo|bar" 2>&1' : '\'echo\' \'foo|bar\' 2>&1');
-        $this->assertNotInLogs($this->windows ? 'echo " foo|bar " 2>&1' : 'echo \' foo|bar \' 2>&1');
+        $this->assertInLogs($this->windows ? '"echo" "foo|bar"' : '\'echo\' \'foo|bar\'');
+        $this->assertNotInLogs($this->windows ? 'echo " foo|bar "' : 'echo \' foo|bar \'');
     }
 
     public function testEnvVar(): void

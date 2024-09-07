@@ -53,7 +53,7 @@ class ExecTask extends Task
     /**
      * Command to be executed.
      *
-     * @var string
+     * @var array|string
      */
     protected $realCommand;
 
@@ -70,8 +70,6 @@ class ExecTask extends Task
      * @var File
      */
     protected $dir;
-
-    protected $currdir;
 
     /**
      * Operating system.
@@ -95,7 +93,7 @@ class ExecTask extends Task
     protected $output;
 
     /**
-     * Whether to use PHP's passthru() function instead of exec().
+     * Whether the command's output should be presented to STDOUT (true) or logged (false).
      *
      * @var bool
      */
@@ -114,6 +112,13 @@ class ExecTask extends Task
      * @var File
      */
     protected $error;
+
+    /**
+     * List of pipes to attach to process when it executes.
+     *
+     * @var array<int, array>
+     */
+    protected $pipeSpec;
 
     /**
      * If spawn is set then [unix] programs will redirect stdout and add '&'.
@@ -150,6 +155,7 @@ class ExecTask extends Task
     private $resolveExecutable = false;
     private $searchPath = false;
     private $env;
+    private $environment;
 
     /**
      * @throws BuildException
@@ -307,7 +313,7 @@ class ExecTask extends Task
     }
 
     /**
-     * Whether to use PHP's passthru() function instead of exec().
+     * Whether the command's output should be presented to STDOUT (true) or logged (false).
      *
      * @param bool $passthru If passthru shall be used
      */
@@ -454,8 +460,6 @@ class ExecTask extends Task
                 "'" . (string) $this->dir . "' is not a readable directory"
             );
         }
-        $this->currdir = getcwd();
-        @chdir($this->dir->getPath());
 
         $this->commandline->setEscape($this->escape);
     }
@@ -469,55 +473,61 @@ class ExecTask extends Task
      */
     protected function buildCommand()
     {
+        $this->pipeSpec = [
+            0 => ['pipe', 'r'], // stdin
+            1 => ['pipe', 'w'], // stdout
+            2 => ['pipe', 'w'], // stderr
+        ];
+
         if (null !== $this->error) {
-            $this->realCommand .= ' 2> ' . escapeshellarg($this->error->getPath());
+            $this->pipeSpec[2] = ['file', $this->error->getPath(), 'w'];
             $this->log(
                 'Writing error output to: ' . $this->error->getPath(),
                 $this->logLevel
             );
+        } elseif ($this->spawn) {
+            $this->pipeSpec[2] = ['file', '/dev/null', 'w'];
+            $this->log('Sending error output to /dev/null', $this->logLevel);
         }
 
         if (null !== $this->output) {
-            $this->realCommand .= ' 1> ' . escapeshellarg($this->output->getPath());
+            $this->pipeSpec[1] = ['file', $this->output->getPath(), 'w'];
             $this->log(
                 'Writing standard output to: ' . $this->output->getPath(),
                 $this->logLevel
             );
         } elseif ($this->spawn) {
-            $this->realCommand .= ' 1>/dev/null';
+            $this->pipeSpec[1] = ['file', '/dev/null', 'w'];
             $this->log('Sending output to /dev/null', $this->logLevel);
         }
 
-        // If neither output nor error are being written to file
-        // then we'll redirect error to stdout so that we can dump
-        // it to screen below.
+        $this->environment = [];
+        $envVars = $this->env->getVariablesObject();
+        foreach ($envVars as $variable) {
+            $key = $variable->getKey();
+            $value = $variable->getValue();
 
-        if (null === $this->output && null === $this->error && false === $this->passthru) {
-            $this->realCommand .= ' 2>&1';
+            if ($key === 'PATH' || $key === 'Path') {
+                continue;
+            }
+
+            $this->log('Setting environment variable: ' . $key . '=' . $value, Project::MSG_VERBOSE);
+            $this->environment[$key] = $value;
         }
 
-        // we ignore the spawn bool for windows
-        if ($this->spawn) {
-            $this->realCommand .= ' &';
-        }
-
-        $envString = '';
-        $environment = $this->env->getVariables();
-        if (null !== $environment) {
-            foreach ($environment as $variable) {
-                if ($this->isPath($variable)) {
-                    continue;
-                }
-                $this->log('Setting environment variable: ' . $variable, Project::MSG_VERBOSE);
-                if (OsCondition::isOS(OsCondition::FAMILY_WINDOWS)) {
-                    $envString .= 'set ' . $variable . '& ';
-                } else {
-                    $envString .= 'export ' . $variable . '; ';
+        $this->realCommand = [$this->executable];
+        foreach ($this->commandline->getArguments() as $arg) {
+            $arg = (string) $arg;
+            if ($arg !== '' && $arg[0] === '$') {
+                // FIXME: there must be a better way of doing this.
+                foreach ($this->environment as $key => $value) {
+                    if ($arg === '$' . $key || $arg === '${' . $key . '}') {
+                        $arg = $value;
+                    }
                 }
             }
+            $this->realCommand[] = $arg;
         }
-
-        $this->realCommand = $envString . $this->commandline . $this->realCommand;
     }
 
     /**
@@ -530,16 +540,62 @@ class ExecTask extends Task
     protected function executeCommand()
     {
         $cmdl = $this->realCommand;
+        if (is_array($cmdl)) {
+            $cmdl = implode(' ', array_map('escapeshellarg', $cmdl));
+        }
 
         $this->log('Executing command: ' . $cmdl, $this->logLevel);
 
-        $output = [];
-        $return = null;
+        $workingDirectory = $this->dir === null ? getcwd() : $this->dir->getPath();
 
-        if ($this->passthru) {
-            passthru($cmdl, $return);
-        } else {
-            exec($cmdl, $output, $return);
+        set_error_handler(static function ($errno, $errstr, $errfile, $errline) {
+            // Ignore all errors/warnings.
+            // A better design choice would be to throw a new BuildException() here.
+            return true;
+        });
+        try {
+            $process = proc_open(
+                $this->realCommand,
+                $this->pipeSpec,
+                $pipes,
+                $workingDirectory,
+                $this->environment
+            );
+        } finally {
+            restore_error_handler();
+        }
+
+        $output = '';
+        $return = 1;
+
+        if (!$this->spawn && is_resource($process)) {
+            fclose($pipes[0]);
+
+            foreach ([1, 2] as $p) {
+                if ($this->pipeSpec[$p] === ['pipe', 'w']) {
+                    if ($this->passthru) {
+                        // We can't use STDOUT & STDERR here as they bypass output buffering (which is used in tests)
+                        $o = fopen('php://output', 'a');
+                        stream_copy_to_stream($pipes[$p], $o);
+                        fclose($o);
+                    } else {
+                        $output .= stream_get_contents($pipes[$p]);
+                    }
+                    fclose($pipes[$p]);
+                }
+            }
+
+            $return = proc_close($process);
+
+            if ($output !== '') {
+                // Strip off the last newline to emulate what exec() does.
+                if ($output[strlen($output) - 1] === "\n") {
+                    $output = substr_replace($output, '', -1);
+                    if ($output[strlen($output) - 1] === "\r") {
+                        $output = substr_replace($output, '', -1);
+                    }
+                }
+            }
         }
 
         return [$return, $output];
@@ -552,28 +608,23 @@ class ExecTask extends Task
      * - verify return value.
      *
      * @param int   $return Return code
-     * @param array $output Array with command output
+     * @param string $output Command output
      *
      * @throws BuildException
      */
     protected function cleanup($return, $output): void
     {
-        if (null !== $this->dir) {
-            @chdir($this->currdir);
-        }
-
         $outloglevel = $this->logOutput ? Project::MSG_INFO : Project::MSG_VERBOSE;
-        foreach ($output as $line) {
-            $this->log($line, $outloglevel);
+        $lines = explode(PHP_EOL, $output);
+        foreach ($lines as $line) {
+            // We use rtrim() here to emulate what exec() does.
+            $this->log(rtrim($line), $outloglevel);
         }
 
         $this->maybeSetReturnPropertyValue($return);
 
         if ($this->outputProperty) {
-            $this->project->setProperty(
-                $this->outputProperty,
-                implode("\n", $output)
-            );
+            $this->project->setProperty($this->outputProperty, $output);
         }
 
         $this->setExitValue($return);
